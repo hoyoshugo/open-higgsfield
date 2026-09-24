@@ -149,10 +149,29 @@ function failureText(status: GenerationStatus): string {
   return "the platform reported a failure";
 }
 
+function isMaskedServerActionError(caught: unknown, message: string): boolean {
+  if (message.includes("Minified React error #441")) return true;
+  if (message.includes("Server Components render")) return true;
+  return (
+    typeof caught === "object" &&
+    caught !== null &&
+    "digest" in caught &&
+    typeof (caught as { digest?: unknown }).digest === "string"
+  );
+}
+
 function describeError(caught: unknown): string {
   const message = caught instanceof Error ? caught.message : String(caught);
   if (caught instanceof MissingCredentialsError || message.includes("Missing platform key")) {
     return "Add your platform key to generate.";
+  }
+  if (isMaskedServerActionError(caught, message)) {
+    const digest =
+      typeof caught === "object" && caught !== null && "digest" in caught
+        ? (caught as { digest?: unknown }).digest
+        : undefined;
+    if (digest) console.error("[generation] server action failed, digest:", digest);
+    return "Generation failed — the server couldn't complete the request. Check your platform key and try again.";
   }
   return `Generation failed — ${message}. Try again; if it repeats, check the key in the sidebar.`;
 }

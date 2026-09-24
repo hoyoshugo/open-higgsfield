@@ -19,7 +19,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   console.info("[blob] upload", summarizeBlobEvent(body));
 
   try {
-    const token = process.env.OPEN_HIGGSFIELD_READ_WRITE_TOKEN;
+    const token = process.env.OPEN_HIGGSFIELD_READ_WRITE_TOKEN ?? process.env.BLOB_READ_WRITE_TOKEN;
     if (!token) throw new Error("Missing OPEN_HIGGSFIELD_READ_WRITE_TOKEN");
     const json = await handleUpload({
       body,
