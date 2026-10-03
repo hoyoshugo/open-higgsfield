@@ -171,7 +171,7 @@ function describeError(caught: unknown): string {
         ? (caught as { digest?: unknown }).digest
         : undefined;
     if (digest) console.error("[generation] server action failed, digest:", digest);
-    return "Generation failed — the server couldn't complete the request. Try again; if it repeats, the provider may be out of credit.";
+    return "Premium generation isn't available right now — the server's fal.ai key is missing or out of credit. Use Draft (free) meanwhile.";
   }
   return `Generation failed — ${message}. Try again in a moment.`;
 }
