@@ -15,8 +15,8 @@ function resolveOrigin(): string {
 
 export const SITE_URL = resolveOrigin();
 
-export const SITE_NAME = "OpenHiggsfield AI";
-export const SITE_DESCRIPTOR = "Open source AI studio";
+export const SITE_NAME = "LumaForge";
+export const SITE_DESCRIPTOR = "AI cinema studio";
 export const SITE_TITLE = `${SITE_NAME} — ${SITE_DESCRIPTOR}`;
 
 export const SITE_DESCRIPTION =
@@ -36,7 +36,7 @@ export const OG_IMAGE = {
   width: 1200,
   height: 630,
   type: "image/png",
-  alt: "The OpenHiggsfield AI open-frame mark on a near-black field, above the OpenHiggsfield AI wordmark, the words Open source AI studio, and a line describing one prompt bar for image and video with every finished run in one gallery.",
+  alt: "The LumaForge open-frame mark on a near-black field, above the LumaForge wordmark, the words AI cinema studio, and a line describing one prompt bar for image and video with every finished run in one gallery.",
 };
 
 /* Next replaces the whole `openGraph` (and `twitter`) object when a route

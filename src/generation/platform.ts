@@ -1,6 +1,14 @@
-import { toAuthorizationHeader } from "./credentials";
+/* LumaForge provider layer. Two backends behind one queue-shaped interface so
+   the studio's submit → poll flow is unchanged:
+     "pol/<model>"  Pollinations — keyless, instant URL (draft quality)
+     "fal/<endpoint>" fal.ai queue — premium image/video, key lives server-side
+   A request id is self-describing (provider prefix + base64url payload), so
+   status polling needs no server state. Intentionally has no relative
+   imports so it can be exercised directly by the node test runner. */
 
-const MODEL_ID = /^[a-z0-9][a-z0-9._/-]*$/i;
+const FAL_QUEUE_HOST = "queue.fal.run";
+const POLLINATIONS_HOST = "image.pollinations.ai";
+const MODEL_PATH = /^(pol|fal)\/[a-z0-9][a-z0-9._/-]*$/i;
 
 export class PlatformError extends Error {
   readonly status: number;
@@ -36,34 +44,35 @@ export type StatusResult =
   | { requestId: string; error: string };
 
 export type PlatformClientOptions = {
-  apiKey: string;
-  baseUrl: string;
+  /** fal.ai key, server-side only. Without it, "fal/" models report a clear error. */
+  falKey?: string;
   fetch?: typeof fetch;
 };
 
 export function isModelId(model: string): boolean {
-  return MODEL_ID.test(model) && !model.includes("..");
+  return MODEL_PATH.test(model) && !model.includes("..");
 }
 
-export function createPlatformClient(options: PlatformClientOptions) {
-  const baseUrl = options.baseUrl.replace(/\/$/, "");
+export function createPlatformClient(options: PlatformClientOptions = {}) {
   const fetchImpl = options.fetch ?? fetch;
-  const auth = toAuthorizationHeader(options.apiKey);
+  const falKey = options.falKey?.trim();
 
-  async function send(method: "GET" | "POST", path: string, body?: Record<string, unknown>) {
-    const url = `${baseUrl}${path}`;
-    console.info("[platform] request", { method, url, body: body ?? null });
+  async function falSend(method: "GET" | "POST", url: string, body?: Record<string, unknown>) {
+    if (!falKey) {
+      throw new PlatformError(503, {
+        detail:
+          "Premium generation is not configured on the server (missing FAL_KEY). Use the free Draft model or ask the owner to add it.",
+      });
+    }
     const response = await fetchImpl(url, {
       method,
       headers: {
-        Authorization: auth,
+        Authorization: `Key ${falKey}`,
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
-
     const payload = await readJson(response);
-    console.info("[platform] response", { method, url, status: response.status, body: payload });
     if (!response.ok) throw new PlatformError(response.status, payload);
     return payload;
   }
@@ -71,45 +80,137 @@ export function createPlatformClient(options: PlatformClientOptions) {
   return {
     async submit(model: string, input: Record<string, unknown>): Promise<QueuedGeneration> {
       if (!isModelId(model)) throw new PlatformError(400, { detail: "Invalid model" });
-      return mapQueued(await send("POST", `/${model}`, input));
+      const slash = model.indexOf("/");
+      const provider = model.slice(0, slash);
+      const target = model.slice(slash + 1);
+
+      if (provider === "pol") return submitPollinations(target, input);
+
+      const data = asRecord(await falSend("POST", `https://${FAL_QUEUE_HOST}/${target}`, input));
+      const upstreamId = stringField(data, "request_id");
+      const statusUrl = stringField(data, "status_url");
+      const responseUrl = stringField(data, "response_url");
+      if (!upstreamId || !statusUrl || !responseUrl) {
+        throw new PlatformError(502, { detail: "Provider response missing request details" });
+      }
+      assertFalUrl(statusUrl);
+      assertFalUrl(responseUrl);
+      return {
+        status: "queued",
+        requestId: `fal.${encode({ s: statusUrl, r: responseUrl, i: upstreamId })}`,
+        statusUrl,
+        cancelUrl: stringField(data, "cancel_url") ?? "",
+      };
     },
+
     async status(requestId: string): Promise<GenerationStatus> {
       if (!requestId) throw new PlatformError(400, { detail: "Missing request id" });
-      return mapStatus(await send("GET", `/requests/${encodeURIComponent(requestId)}/status`));
+      const dot = requestId.indexOf(".");
+      const provider = dot > 0 ? requestId.slice(0, dot) : "";
+      const payload = dot > 0 ? requestId.slice(dot + 1) : "";
+
+      if (provider === "pol") {
+        const { u } = decode(payload);
+        assertPollinationsUrl(String(u));
+        return { status: "completed", requestId, images: [{ url: String(u) }] };
+      }
+      if (provider !== "fal") throw new PlatformError(400, { detail: "Unknown request id" });
+
+      const { s, r } = decode(payload);
+      assertFalUrl(String(s));
+      assertFalUrl(String(r));
+      const state = asRecord(await falSend("GET", String(s)));
+      const raw = (stringField(state, "status") ?? "").toUpperCase();
+      if (raw !== "COMPLETED") {
+        return { status: raw === "IN_QUEUE" ? "queued" : "in_progress", requestId };
+      }
+      if (state.error !== undefined && state.error !== null && state.error !== "") {
+        return { status: "failed", requestId, error: state.error };
+      }
+      const result = asRecord(await falSend("GET", String(r)));
+      return mapResult(requestId, result);
     },
   };
 }
 
-function mapQueued(payload: unknown): QueuedGeneration {
-  const data = asRecord(payload);
-  const requestId = stringField(data, "request_id");
-  if (!requestId) throw new PlatformError(502, { detail: "Platform response missing request_id" });
+function submitPollinations(model: string, input: Record<string, unknown>): QueuedGeneration {
+  const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
+  if (!prompt) throw new PlatformError(400, { detail: "Prompt is empty" });
+  const width = clampInt(input.width, 1024);
+  const height = clampInt(input.height, 576);
+  const seed = Math.floor(Math.random() * 1_000_000);
+  const url =
+    `https://${POLLINATIONS_HOST}/prompt/${encodeURIComponent(prompt)}` +
+    `?model=${encodeURIComponent(model)}&width=${width}&height=${height}&seed=${seed}&nologo=true&enhance=true`;
   return {
-    status: stringField(data, "status") ?? "queued",
-    requestId,
-    statusUrl: stringField(data, "status_url") ?? "",
-    cancelUrl: stringField(data, "cancel_url") ?? "",
+    status: "queued",
+    requestId: `pol.${encode({ u: url })}`,
+    statusUrl: "",
+    cancelUrl: "",
   };
 }
 
-function mapStatus(payload: unknown): GenerationStatus {
-  const data = asRecord(payload);
-  const requestId = stringField(data, "request_id") ?? "";
-  const images = Array.isArray(data.images)
-    ? data.images.flatMap((item) => {
+function mapResult(requestId: string, result: Record<string, unknown>): GenerationStatus {
+  const images = Array.isArray(result.images)
+    ? result.images.flatMap((item) => {
         const url = asRecord(item).url;
         return typeof url === "string" ? [{ url }] : [];
       })
-    : undefined;
-  const videoUrl = asRecord(data.video).url;
+    : [];
+  const single = asRecord(result.image).url;
+  if (typeof single === "string") images.push({ url: single });
+  const videoUrl = asRecord(result.video).url;
 
+  if (!images.length && typeof videoUrl !== "string") {
+    return { status: "failed", requestId, error: "The provider returned no media." };
+  }
   return {
-    status: stringField(data, "status") ?? "unknown",
+    status: "completed",
     requestId,
-    ...(images?.length ? { images } : {}),
+    ...(images.length ? { images } : {}),
     ...(typeof videoUrl === "string" ? { video: { url: videoUrl } } : {}),
-    ...(data.error !== undefined ? { error: data.error } : {}),
   };
+}
+
+/* The request id comes back from the browser, so anything it names must be a
+   host we expect before the server calls it with a key attached. */
+function assertFalUrl(value: string) {
+  let host = "";
+  try {
+    const parsed = new URL(value);
+    host = parsed.protocol === "https:" ? parsed.hostname : "";
+  } catch {
+    /* falls through to the rejection below */
+  }
+  if (host !== FAL_QUEUE_HOST) throw new PlatformError(400, { detail: "Invalid request id" });
+}
+
+function assertPollinationsUrl(value: string) {
+  let host = "";
+  try {
+    const parsed = new URL(value);
+    host = parsed.protocol === "https:" ? parsed.hostname : "";
+  } catch {
+    /* falls through to the rejection below */
+  }
+  if (host !== POLLINATIONS_HOST) throw new PlatformError(400, { detail: "Invalid request id" });
+}
+
+function encode(value: Record<string, unknown>): string {
+  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+}
+
+function decode(payload: string): Record<string, unknown> {
+  try {
+    return asRecord(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")));
+  } catch {
+    throw new PlatformError(400, { detail: "Invalid request id" });
+  }
+}
+
+function clampInt(value: unknown, fallback: number): number {
+  const n = typeof value === "number" ? Math.round(value) : fallback;
+  return Math.min(1536, Math.max(256, n));
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -134,7 +235,15 @@ async function readJson(response: Response): Promise<unknown> {
 }
 
 function messageFromBody(status: number, body: unknown): string {
-  const detail = asRecord(body).detail;
+  const record = asRecord(body);
+  const detail = record.detail;
   if (typeof detail === "string" && detail) return detail;
+  if (Array.isArray(detail) && detail.length) {
+    const first = asRecord(detail[0]).msg;
+    if (typeof first === "string") return first;
+  }
+  if (status === 401 || status === 403) return "The generation provider rejected the server key.";
+  if (status === 402) return "The generation provider reports no remaining credit on the server account.";
+  if (status === 429) return "The generation provider is rate limiting requests. Try again shortly.";
   return `Platform request failed (${status})`;
 }

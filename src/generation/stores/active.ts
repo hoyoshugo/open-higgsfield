@@ -22,7 +22,7 @@ export const useActive = create<ActiveState>()(
   persist(
     (set) => ({
       surface: "video",
-      model: "seedance-2.5",
+      model: "kling-25-pro",
       batch: 1,
       setModel: (id) => {
         const model = getModel(id);
@@ -47,7 +47,7 @@ export const useActive = create<ActiveState>()(
         try {
           getModel(state.model);
         } catch {
-          state.setModel("seedance-2.5");
+          state.setModel("kling-25-pro");
         }
       },
     },

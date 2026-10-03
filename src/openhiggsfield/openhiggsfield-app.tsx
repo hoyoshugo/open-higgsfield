@@ -163,7 +163,7 @@ function isMaskedServerActionError(caught: unknown, message: string): boolean {
 function describeError(caught: unknown): string {
   const message = caught instanceof Error ? caught.message : String(caught);
   if (caught instanceof MissingCredentialsError || message.includes("Missing platform key")) {
-    return "Add your platform key to generate.";
+    return "Generation is not available right now. Try again shortly.";
   }
   if (isMaskedServerActionError(caught, message)) {
     const digest =
@@ -171,9 +171,9 @@ function describeError(caught: unknown): string {
         ? (caught as { digest?: unknown }).digest
         : undefined;
     if (digest) console.error("[generation] server action failed, digest:", digest);
-    return "Generation failed — the server couldn't complete the request. Check your platform key and try again.";
+    return "Generation failed — the server couldn't complete the request. Try again; if it repeats, the provider may be out of credit.";
   }
-  return `Generation failed — ${message}. Try again; if it repeats, check the key in the sidebar.`;
+  return `Generation failed — ${message}. Try again in a moment.`;
 }
 
 export function OpenHiggsfieldApp({ fontClassName = "" }: { fontClassName?: string }) {
@@ -345,7 +345,7 @@ export function OpenHiggsfieldApp({ fontClassName = "" }: { fontClassName?: stri
   const generate = useCallback(async () => {
     if (!keyConfigured) {
       setKeysOpen(true);
-      setError("Add your platform key to generate.");
+      setError("Generation is not available right now.");
       return;
     }
     const plane = assemblePlane();
