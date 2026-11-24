@@ -106,3 +106,22 @@ test("SSRF guard: forged request ids never reach foreign hosts", async () => {
   await assert.rejects(() => c.status(pol), PlatformError);
   await assert.rejects(() => c.status("garbage"), PlatformError);
 });
+test("music: fal audio output is returned as playable media", async () => {
+  const calls = [];
+  const fetchStub = async (url, init) => {
+    calls.push(String(url));
+    if (init?.method === "POST")
+      return json({
+        request_id: "r1",
+        status_url: "https://queue.fal.run/fal-ai/stable-audio-25/requests/r1/status",
+        response_url: "https://queue.fal.run/fal-ai/stable-audio-25/requests/r1",
+      });
+    if (String(url).endsWith("/status")) return json({ status: "COMPLETED" });
+    return json({ audio: { url: "https://v3.fal.media/files/x/track.wav" } });
+  };
+  const c = createPlatformClient({ falKey: "id:secret", fetch: fetchStub });
+  const q = await c.submit("fal/fal-ai/stable-audio-25/text-to-audio", { prompt: "handpan", seconds_total: 30 });
+  const s = await c.status(q.requestId);
+  assert.equal(s.status, "completed");
+  assert.equal(s.video.url, "https://v3.fal.media/files/x/track.wav");
+});

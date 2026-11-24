@@ -1,10 +1,11 @@
-import { fluxPro, fluxSchnell, kling25Pro, lfDraft, veo3Fast } from "./lumaforge";
+import { fluxPro, fluxSchnell, kling25Pro, lfDraft, stableAudioMusic, veo3Fast } from "./lumaforge";
 import { parseSettings } from "./parse-settings";
 import type { ModelEntry } from "./types";
 
 export const MODELS: readonly ModelEntry[] = [
   kling25Pro,
   veo3Fast,
+  stableAudioMusic,
   fluxPro,
   fluxSchnell,
   lfDraft,

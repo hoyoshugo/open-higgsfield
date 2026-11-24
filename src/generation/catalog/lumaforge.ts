@@ -57,3 +57,15 @@ export const veo3Fast: ModelEntry = {
     generateAudio: { type: "boolean", default: true },
   },
 };
+
+/* Music: fal's Stable Audio. Lives on the video surface so the existing player
+   and download flow handle it; the provider layer returns the track as media. */
+export const stableAudioMusic: ModelEntry = {
+  id: "stable-audio-music",
+  surface: "video",
+  label: "Music (Stable Audio 2.5)",
+  roles: {},
+  settings: {
+    duration: { type: "range", min: 10, max: 190, default: 30, step: 10 },
+  },
+};

@@ -61,6 +61,13 @@ const MAP: Record<string, Mapper> = {
       body: { ...body, aspect_ratio: plane.settings.aspectRatio },
     };
   },
+  "stable-audio-music": (plane) => ({
+    path: "fal/fal-ai/stable-audio-25/text-to-audio",
+    body: {
+      prompt: plane.prompt.text,
+      seconds_total: Number(plane.settings.duration) || 30,
+    },
+  }),
   "veo3-fast": (plane) => ({
     path: "fal/fal-ai/veo3/fast",
     body: {

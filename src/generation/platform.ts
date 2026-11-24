@@ -159,7 +159,9 @@ function mapResult(requestId: string, result: Record<string, unknown>): Generati
     : [];
   const single = asRecord(result.image).url;
   if (typeof single === "string") images.push({ url: single });
-  const videoUrl = asRecord(result.video).url;
+  const audio = result.audio ?? result.audio_file;
+  const audioUrl = typeof audio === "string" ? audio : asRecord(audio).url;
+  const videoUrl = asRecord(result.video).url ?? audioUrl;
 
   if (!images.length && typeof videoUrl !== "string") {
     return { status: "failed", requestId, error: "The provider returned no media." };
